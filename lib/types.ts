@@ -27,6 +27,7 @@ export interface Entry {
   hours: number
   start_time: string | null
   end_time: string | null
+  is_paid: boolean
   created_at: string
   job?: Job
 }
