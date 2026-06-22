@@ -23,9 +23,16 @@ const profileSchema = z.object({
 })
 type ProfileForm = z.infer<typeof profileSchema>
 
+interface JobOption {
+  id: string
+  name: string
+  color: string
+}
+
 interface Props {
   profile: Profile | null
   email: string
+  jobs: JobOption[]
 }
 
 type EntryRow = {
@@ -38,10 +45,11 @@ type EntryRow = {
   job: { name: string; type: string; rate: number; color: string } | null
 }
 
-export default function SettingsClient({ profile, email }: Props) {
+export default function SettingsClient({ profile, email, jobs }: Props) {
   const router = useRouter()
   const [exporting, setExporting] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [reportJobId, setReportJobId] = useState<string | null>(null)
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -113,16 +121,19 @@ export default function SettingsClient({ profile, email }: Props) {
     const userName = profile?.full_name ?? 'Unknown'
     const generatedDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
-    const totalHours = entries.reduce((s, e) => s + e.hours, 0)
-    const totalEarnings = entries.reduce((s, e) =>
+    const selectedJob = jobs.find(j => j.id === reportJobId) ?? null
+    const visibleEntries = selectedJob ? entries.filter(e => e.job?.name === selectedJob.name) : entries
+
+    const totalHours = visibleEntries.reduce((s, e) => s + e.hours, 0)
+    const totalEarnings = visibleEntries.reduce((s, e) =>
       s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0), 0)
-    const paidEarnings = entries.filter(e => e.is_paid).reduce((s, e) =>
+    const paidEarnings = visibleEntries.filter(e => e.is_paid).reduce((s, e) =>
       s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0), 0)
     const unpaidEarnings = totalEarnings - paidEarnings
 
-    // Job breakdown
+    // Job breakdown (only shown when viewing all jobs)
     const jobMap: Record<string, { name: string; color: string; hours: number; earnings: number; count: number }> = {}
-    entries.forEach(e => {
+    visibleEntries.forEach(e => {
       if (!e.job) return
       const key = e.job.name
       if (!jobMap[key]) jobMap[key] = { name: e.job.name, color: e.job.color, hours: 0, earnings: 0, count: 0 }
@@ -130,11 +141,11 @@ export default function SettingsClient({ profile, email }: Props) {
       jobMap[key].earnings += calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed')
       jobMap[key].count++
     })
-    const jobs = Object.values(jobMap).sort((a, b) => b.earnings - a.earnings)
+    const jobBreakdown = Object.values(jobMap).sort((a, b) => b.earnings - a.earnings)
 
     // Entries grouped by month
     const byMonth: Record<string, EntryRow[]> = {}
-    entries.forEach(e => {
+    visibleEntries.forEach(e => {
       const key = e.date.slice(0, 7)
       if (!byMonth[key]) byMonth[key] = []
       byMonth[key].push(e)
@@ -142,7 +153,7 @@ export default function SettingsClient({ profile, email }: Props) {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const fmt = (ym: string) => { const [y,m] = ym.split('-'); return `${MONTHS[+m-1]} ${y}` }
 
-    const jobRows = jobs.map(j => `
+    const jobRows = jobBreakdown.map(j => `
       <tr>
         <td><span style="display:inline-flex;align-items:center;gap:8px;">
           <span style="width:10px;height:10px;border-radius:50%;background:${j.color};flex-shrink:0;display:inline-block;"></span>
@@ -264,13 +275,13 @@ export default function SettingsClient({ profile, email }: Props) {
       </div>
       <div class="brand-text">
         <h1>WorkLog</h1>
-        <p>Hours &amp; Earnings Report</p>
+        <p>Hours &amp; Earnings Report${selectedJob ? ` &mdash; ${selectedJob.name}` : ''}</p>
       </div>
     </div>
     <div class="meta">
       <div><strong>Prepared for:</strong> ${userName}</div>
       <div><strong>Generated:</strong> ${generatedDate}</div>
-      <div><strong>Total records:</strong> ${entries.length} entries</div>
+      <div><strong>Total records:</strong> ${visibleEntries.length} entries</div>
     </div>
   </div>
 
@@ -295,7 +306,7 @@ export default function SettingsClient({ profile, email }: Props) {
     </div>
   </div>
 
-  ${jobs.length > 0 ? `
+  ${jobBreakdown.length > 1 ? `
   <div class="section">
     <div class="section-title">By Job</div>
     <table>
@@ -419,6 +430,43 @@ export default function SettingsClient({ profile, email }: Props) {
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           Download your data as CSV or generate a printable PDF report.
         </p>
+
+        {/* Report job filter */}
+        {jobs.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Report scope</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setReportJobId(null)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  reportJobId === null
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                All jobs
+              </button>
+              {jobs.map(job => (
+                <button
+                  key={job.id}
+                  onClick={() => setReportJobId(job.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                    reportJobId === job.id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: reportJobId === job.id ? 'white' : job.color }}
+                  />
+                  {job.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-3">
           <Button
             onClick={exportCSV}
