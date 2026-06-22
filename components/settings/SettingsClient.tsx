@@ -227,15 +227,31 @@ export default function SettingsClient({ profile, email }: Props) {
   /* Footer */
   .footer{margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;color:#9ca3af;font-size:10px;}
 
+  /* Print button */
+  .print-bar{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 40px;display:flex;justify-content:flex-end;gap:10px;}
+  .btn-print{display:inline-flex;align-items:center;gap:7px;padding:8px 18px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .btn-print:hover{background:#4338ca;}
+
   @media print{
     body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .page{padding:24px 28px;}
     .stat{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fafafa!important;}
     .accent-bar{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .print-bar{display:none;}
   }
 </style>
 </head>
 <body>
+<div class="print-bar">
+  <button class="btn-print" onclick="window.print()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="6 9 6 2 18 2 18 9"/>
+      <path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
+      <rect x="6" y="14" width="12" height="8"/>
+    </svg>
+    Print / Save as PDF
+  </button>
+</div>
 <div class="page">
 
   <div class="header">
@@ -317,20 +333,16 @@ export default function SettingsClient({ profile, email }: Props) {
 </body>
 </html>`
 
-    const win = window.open('', '_blank', 'width=1000,height=800')
+    const win = window.open('', '_blank')
     if (!win) {
-      toast.error('Allow popups to export the report')
+      toast.error('Allow popups to open the report')
       setPrinting(false)
       return
     }
     win.document.write(html)
     win.document.close()
     win.focus()
-    // Small delay lets the browser finish rendering before print dialog opens
-    setTimeout(() => {
-      win.print()
-      setPrinting(false)
-    }, 600)
+    setPrinting(false)
   }
 
   async function signOut() {
@@ -436,7 +448,7 @@ export default function SettingsClient({ profile, email }: Props) {
           </Button>
         </div>
         <p className="text-xs text-gray-400 mt-3">
-          The PDF report opens in a new tab — use the print dialog to send to a printer or save as PDF.
+          The report opens in a new tab. Review it, then use the Print button to send to a printer or save as PDF.
         </p>
       </div>
 
