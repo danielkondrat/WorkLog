@@ -11,13 +11,21 @@ import EntryCard from './EntryCard'
 import NewEntryModal from './NewEntryModal'
 import { Button } from '@/components/ui/button'
 
+interface Stats {
+  totalHours: number
+  totalEarned: number
+  paidEarned: number
+  unpaidEarned: number
+}
+
 interface Props {
   initialJobs: Job[]
   initialEntries: EntryWithJob[]
   profile: Profile | null
+  stats: Stats
 }
 
-export default function LogClient({ initialJobs, initialEntries, profile }: Props) {
+export default function LogClient({ initialJobs, initialEntries, profile, stats: initialStats }: Props) {
   const [jobs] = useState(initialJobs)
   const [entries, setEntries] = useState(initialEntries)
   const [showModal, setShowModal] = useState(false)
@@ -243,7 +251,7 @@ export default function LogClient({ initialJobs, initialEntries, profile }: Prop
         </Button>
       ) : null}
 
-      <SummaryCards entries={entries} jobs={jobs} currency={currency} />
+      <SummaryCards stats={initialStats} currency={currency} />
 
       <div>
         <div className="flex items-center justify-between mb-3">

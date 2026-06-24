@@ -1,255 +1,300 @@
-﻿'use client'
+'use client'
 
 import { useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
-import type { Job, EntryWithJob } from '@/lib/types'
-import { calcEarnings, formatHours, formatMoney, getWeekBounds, toLocalDateString } from '@/lib/utils'
-
-type Period = 'day' | 'week' | 'month'
-type Metric = 'hours' | 'earnings'
+import { motion, AnimatePresence } from 'framer-motion'
+import type { EntryWithJob } from '@/lib/types'
+import { calcEarnings, formatHours, formatMoney, toLocalDateString } from '@/lib/utils'
 
 interface Props {
   entries: EntryWithJob[]
-  jobs: Job[]
+  jobs: unknown[]
   currency: string
 }
 
-function getMonday(d: Date) {
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const mon = new Date(d)
-  mon.setDate(d.getDate() + diff)
-  return mon
+const DOW_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+
+function buildCalendarDays(year: number, month: number): (number | null)[] {
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7 // Mon=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const days: (number | null)[] = Array(firstDow).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) days.push(d)
+  while (days.length % 7 !== 0) days.push(null)
+  return days
 }
 
-function weekLabel(d: Date): string {
-  const mon = getMonday(d)
-  return `${mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-}
+export default function AnalyticsClient({ entries, currency }: Props) {
+  const today = new Date()
+  const todayStr = toLocalDateString(today)
+  const [viewDate, setViewDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
-function monthLabel(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
-}
+  const year = viewDate.getFullYear()
+  const month = viewDate.getMonth()
 
-export default function AnalyticsClient({ entries, jobs, currency }: Props) {
-  const [period, setPeriod] = useState<Period>('week')
-  const [metric, setMetric] = useState<Metric>('hours')
+  const calDays = useMemo(() => buildCalendarDays(year, month), [year, month])
 
-  const chartData = useMemo(() => {
-    const now = new Date()
-
-    if (period === 'day') {
-      const buckets: Record<string, number> = {}
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now)
-        d.setDate(now.getDate() - i)
-        const key = toLocalDateString(d)
-        buckets[key] = 0
-      }
-      for (const e of entries) {
-        if (e.date in buckets) {
-          const val = metric === 'hours' ? e.hours : (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type) : 0)
-          buckets[e.date] = (buckets[e.date] ?? 0) + val
-        }
-      }
-      return Object.entries(buckets).map(([date, value]) => ({
-        label: new Date(date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        value: parseFloat(value.toFixed(2)),
-      }))
-    }
-
-    if (period === 'week') {
-      const buckets: Record<string, number> = {}
-      const labels: Record<string, string> = {}
-      for (let i = 11; i >= 0; i--) {
-        const d = new Date(now)
-        d.setDate(now.getDate() - i * 7)
-        const mon = getMonday(d)
-        const key = toLocalDateString(mon)
-        buckets[key] = 0
-        labels[key] = weekLabel(d)
-      }
-      for (const e of entries) {
-        const eDate = new Date(e.date + 'T00:00:00')
-        const mon = getMonday(eDate)
-        const key = toLocalDateString(mon)
-        if (key in buckets) {
-          const val = metric === 'hours' ? e.hours : (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type) : 0)
-          buckets[key] = (buckets[key] ?? 0) + val
-        }
-      }
-      return Object.entries(buckets).map(([key, value]) => ({
-        label: labels[key],
-        value: parseFloat(value.toFixed(2)),
-      }))
-    }
-
-    // month
-    const buckets: Record<string, number> = {}
-    const labels: Record<string, string> = {}
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      buckets[key] = 0
-      labels[key] = monthLabel(d)
-    }
+  const entriesByDate = useMemo(() => {
+    const map: Record<string, EntryWithJob[]> = {}
     for (const e of entries) {
-      const key = e.date.slice(0, 7)
-      if (key in buckets) {
-        const val = metric === 'hours' ? e.hours : (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type) : 0)
-        buckets[key] = (buckets[key] ?? 0) + val
-      }
+      if (!map[e.date]) map[e.date] = []
+      map[e.date].push(e)
     }
-    return Object.entries(buckets).map(([key, value]) => ({
-      label: labels[key],
-      value: parseFloat(value.toFixed(2)),
-    }))
-  }, [entries, period, metric])
+    return map
+  }, [entries])
 
-  const jobSummary = useMemo(() => {
-    const map: Record<string, { job: Job; hours: number; earnings: number }> = {}
-    const now = new Date()
+  const selectedEntries = selectedDate ? (entriesByDate[selectedDate] ?? []) : []
 
-    for (const e of entries) {
-      if (!e.job) continue
-      const key = e.job_id
-      const eDate = new Date(e.date + 'T00:00:00')
-      let inPeriod = false
+  const monthLabel = viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const isCurrentMonth = year === today.getFullYear() && month === today.getMonth()
 
-      if (period === 'day') {
-        const d30 = new Date(now); d30.setDate(now.getDate() - 29); d30.setHours(0,0,0,0)
-        inPeriod = eDate >= d30
-      } else if (period === 'week') {
-        const w12 = new Date(now); w12.setDate(now.getDate() - 83); w12.setHours(0,0,0,0)
-        inPeriod = eDate >= w12
-      } else {
-        const m12 = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-        inPeriod = eDate >= m12
-      }
+  function prevMonth() { setViewDate(new Date(year, month - 1, 1)); setSelectedDate(null) }
+  function nextMonth() { setViewDate(new Date(year, month + 1, 1)); setSelectedDate(null) }
+  function goToday() { setViewDate(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedDate(null) }
 
-      if (!inPeriod) continue
-      if (!map[key]) map[key] = { job: e.job, hours: 0, earnings: 0 }
-      map[key].hours += e.hours
-      map[key].earnings += calcEarnings(e.hours, e.job.rate, e.job.type)
-    }
+  function handleDayClick(day: number) {
+    const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    if (entriesByDate[ds]?.length) setSelectedDate(prev => prev === ds ? null : ds)
+  }
 
-    return Object.values(map).sort((a, b) => b.hours - a.hours)
-  }, [entries, period])
-
-  const isEmpty = entries.length === 0
+  const selectedLabel = selectedDate
+    ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    : ''
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="space-y-6"
+      className="space-y-5"
     >
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+        {!isCurrentMonth && (
+          <button
+            onClick={goToday}
+            className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            Today
+          </button>
+        )}
+      </div>
 
-      {isEmpty ? (
+      {entries.length === 0 ? (
         <div className="text-center py-20 text-gray-400 dark:text-gray-500">
           <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
             </svg>
           </div>
           <p className="text-sm font-medium">No data yet</p>
-          <p className="text-xs mt-1">Log some hours to see your analytics</p>
+          <p className="text-xs mt-1">Log some hours to see your calendar</p>
         </div>
       ) : (
-        <>
-          {/* Period switcher */}
-          <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
-            {(['day', 'week', 'month'] as Period[]).map(p => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg capitalize transition-colors ${
-                  period === p
-                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                {p === 'day' ? 'Day' : p === 'week' ? 'Week' : 'Month'}
-              </button>
+        <div className="bg-card rounded-2xl shadow-sm overflow-hidden">
+          {/* Month navigation */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+            <button
+              onClick={prevMonth}
+              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+            </button>
+            <span className="text-sm font-semibold text-gray-900 dark:text-white">{monthLabel}</span>
+            <button
+              onClick={nextMonth}
+              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* Day-of-week header */}
+          <div className="grid grid-cols-7 border-b border-gray-100 dark:border-gray-800">
+            {DOW_LABELS.map((label, i) => (
+              <div key={i} className="py-2 text-center text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                {label}
+              </div>
             ))}
           </div>
 
-          {/* Metric toggle */}
-          <div className="flex gap-2">
-            {(['hours', 'earnings'] as Metric[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setMetric(m)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                  metric === m
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
-                }`}
-              >
-                {m === 'hours' ? 'Hours' : 'Earnings'}
-              </button>
-            ))}
+          {/* Calendar grid */}
+          <div className="grid grid-cols-7">
+            {calDays.map((day, i) => {
+              if (day === null) {
+                return (
+                  <div
+                    key={i}
+                    className="min-h-[56px] border-b border-r border-gray-50 dark:border-gray-800/40 last:border-r-0"
+                  />
+                )
+              }
+
+              const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+              const dayEntries = entriesByDate[ds] ?? []
+              const hasWork = dayEntries.length > 0
+              const totalHours = dayEntries.reduce((s, e) => s + e.hours, 0)
+              const isToday = ds === todayStr
+              const isSelected = ds === selectedDate
+              // Up to 3 unique job colors
+              const jobColors = [...new Set(dayEntries.map(e => e.job?.color ?? '#6366F1'))].slice(0, 3)
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleDayClick(day)}
+                  disabled={!hasWork}
+                  className={`relative flex flex-col items-center pt-2 pb-2 gap-0.5 min-h-[56px] border-b border-r border-gray-50 dark:border-gray-800/40 transition-colors focus:outline-none ${
+                    (i + 1) % 7 === 0 ? 'border-r-0' : ''
+                  } ${
+                    hasWork
+                      ? 'cursor-pointer hover:bg-indigo-50/70 dark:hover:bg-indigo-950/20'
+                      : 'cursor-default'
+                  } ${
+                    isSelected ? 'bg-indigo-50 dark:bg-indigo-950/30' : ''
+                  }`}
+                >
+                  {/* Day number */}
+                  <span className={`w-6 h-6 flex items-center justify-center text-xs font-semibold rounded-full flex-shrink-0 ${
+                    isToday
+                      ? 'bg-indigo-600 text-white'
+                      : hasWork
+                      ? 'text-gray-900 dark:text-white'
+                      : 'text-gray-300 dark:text-gray-600'
+                  }`}>
+                    {day}
+                  </span>
+
+                  {/* Job color dots */}
+                  {hasWork && (
+                    <div className="flex gap-0.5 items-center">
+                      {jobColors.map((color, ci) => (
+                        <span key={ci} className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Hours label */}
+                  {hasWork && (
+                    <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 leading-none">
+                      {totalHours % 1 === 0 ? `${totalHours}h` : `${totalHours.toFixed(1)}h`}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
-          {/* Chart */}
-          <div className="bg-card rounded-2xl shadow-sm p-4">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} margin={{ top: 4, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '12px',
-                    fontSize: 13,
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                  }}
-                  formatter={(value) => {
-                    const n = typeof value === 'number' ? value : 0
-                    return metric === 'hours'
-                      ? [`${formatHours(n)} hrs`, 'Hours']
-                      : [formatMoney(n, currency), 'Earnings']
-                  }}
-                />
-                <Bar dataKey="value" fill="#6366F1" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          {/* Legend */}
+          <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-indigo-600 inline-flex items-center justify-center text-white text-[9px] font-bold">1</span>
+              Today
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block" />
+              Worked — tap for details
+            </span>
           </div>
-
-          {/* Job breakdown */}
-          {jobSummary.length > 0 && (
-            <div className="bg-card rounded-2xl shadow-sm divide-y divide-gray-50 dark:divide-gray-800">
-              {jobSummary.map(({ job, hours, earnings }) => (
-                <div key={job.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: job.color }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{job.name}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatHours(hours)}h</p>
-                    <p className="text-xs text-gray-400">{formatMoney(earnings, currency)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+        </div>
       )}
+
+      {/* Day detail popup */}
+      <AnimatePresence>
+        {selectedDate && selectedEntries.length > 0 && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="fixed inset-0 bg-black/25 z-40"
+              onClick={() => setSelectedDate(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 6 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              className="fixed inset-x-4 bottom-24 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[380px] z-50 bg-card rounded-2xl shadow-2xl overflow-hidden"
+            >
+              {/* Popup header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">{selectedLabel}</p>
+                <button
+                  onClick={() => setSelectedDate(null)}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Entry list */}
+              <div className="divide-y divide-gray-50 dark:divide-gray-800 max-h-72 overflow-y-auto">
+                {selectedEntries.map(e => {
+                  const earnings = e.job ? calcEarnings(e.hours, e.job.rate, e.job.type) : 0
+                  return (
+                    <div key={e.id} className="flex items-start gap-3 px-4 py-3">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0"
+                        style={{ backgroundColor: e.job?.color ?? '#6366F1' }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                              {e.job?.name ?? 'Unknown job'}
+                            </p>
+                            {e.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{e.description}</p>
+                            )}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatHours(e.hours)}h</p>
+                            <p className="text-xs text-indigo-600 dark:text-indigo-400">{formatMoney(earnings, currency)}</p>
+                          </div>
+                        </div>
+                        {e.is_paid && (
+                          <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                            Paid
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Total footer */}
+              {selectedEntries.length > 1 && (
+                <div className="px-4 py-2.5 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-between text-xs font-semibold text-gray-900 dark:text-white">
+                  <span className="text-gray-500 dark:text-gray-400">Total</span>
+                  <span>
+                    {formatHours(selectedEntries.reduce((s, e) => s + e.hours, 0))}h
+                    {' · '}
+                    {formatMoney(
+                      selectedEntries.reduce((s, e) => s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type) : 0), 0),
+                      currency
+                    )}
+                  </span>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
