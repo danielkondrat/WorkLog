@@ -49,6 +49,7 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
   const router = useRouter()
   const [exporting, setExporting] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [savingImage, setSavingImage] = useState(false)
   const [reportJobId, setReportJobId] = useState<string | null>(null)
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -122,16 +123,13 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
     const generatedDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
     const selectedJob = jobs.find(j => j.id === reportJobId) ?? null
-    const visibleEntries = selectedJob ? entries.filter(e => e.job?.name === selectedJob.name) : entries
+    const allVisible = selectedJob ? entries.filter(e => e.job?.name === selectedJob.name) : entries
+    const visibleEntries = allVisible.filter(e => !e.is_paid)
 
     const totalHours = visibleEntries.reduce((s, e) => s + e.hours, 0)
     const totalEarnings = visibleEntries.reduce((s, e) =>
       s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0), 0)
-    const paidEarnings = visibleEntries.filter(e => e.is_paid).reduce((s, e) =>
-      s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0), 0)
-    const unpaidEarnings = totalEarnings - paidEarnings
 
-    // Job breakdown (only shown when viewing all jobs)
     const jobMap: Record<string, { name: string; color: string; hours: number; earnings: number; count: number }> = {}
     visibleEntries.forEach(e => {
       if (!e.job) return
@@ -143,7 +141,6 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
     })
     const jobBreakdown = Object.values(jobMap).sort((a, b) => b.earnings - a.earnings)
 
-    // Entries grouped by month
     const byMonth: Record<string, EntryRow[]> = {}
     visibleEntries.forEach(e => {
       const key = e.date.slice(0, 7)
@@ -177,11 +174,7 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
           </span></td>
           <td style="color:#6b7280;">${e.description ?? '—'}</td>
           <td style="text-align:right;">${e.hours.toFixed(2)}h</td>
-          <td style="text-align:right;">${currency}${earn.toFixed(2)}</td>
-          <td style="text-align:center;">${e.is_paid
-            ? '<span style="color:#059669;font-weight:600;font-size:11px;">&#10003; Paid</span>'
-            : '<span style="color:#9ca3af;font-size:11px;">Unpaid</span>'
-          }</td>
+          <td style="text-align:right;font-weight:600;color:#4f46e5;">${currency}${earn.toFixed(2)}</td>
         </tr>`
       }).join('')
       return `
@@ -189,7 +182,6 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
           <td colspan="3" style="padding:10px 10px 6px;font-size:12px;font-weight:700;color:#374151;border-bottom:2px solid #e5e7eb;letter-spacing:0.02em;">${fmt(month)}</td>
           <td style="text-align:right;padding:10px 10px 6px;font-size:12px;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;">${mh.toFixed(2)}h</td>
           <td style="text-align:right;padding:10px 10px 6px;font-size:12px;font-weight:600;color:#4f46e5;border-bottom:2px solid #e5e7eb;">${currency}${me.toFixed(2)}</td>
-          <td style="border-bottom:2px solid #e5e7eb;"></td>
         </tr>${rows}`
     }).join('')
 
@@ -197,13 +189,11 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>WorkLog Report — ${userName}</title>
+<title>Outstanding Hours — ${userName}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#111827;background:#fff;font-size:13px;line-height:1.5;}
   .page{max-width:860px;margin:0 auto;padding:48px 40px;}
-
-  /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;}
   .brand{display:flex;align-items:center;gap:12px;}
   .brand-icon{width:40px;height:40px;background:#4f46e5;border-radius:10px;display:flex;align-items:center;justify-content:center;}
@@ -212,37 +202,23 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
   .brand-text p{font-size:12px;color:#6b7280;margin-top:1px;}
   .meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.8;}
   .meta strong{color:#374151;}
-
-  /* Accent bar */
   .accent-bar{height:3px;background:linear-gradient(90deg,#4f46e5,#7c3aed);border-radius:99px;margin-bottom:28px;}
-
-  /* Summary */
-  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:32px;}
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:32px;}
   .stat{border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fafafa;}
   .stat-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#9ca3af;margin-bottom:5px;}
   .stat-value{font-size:20px;font-weight:800;color:#111827;}
   .stat-value.indigo{color:#4f46e5;}
   .stat-value.amber{color:#d97706;}
-  .stat-value.green{color:#059669;}
-
-  /* Section */
   .section{margin-bottom:30px;}
   .section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #f3f4f6;}
-
-  /* Tables */
   table{width:100%;border-collapse:collapse;}
   th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#9ca3af;padding:8px 10px;text-align:left;border-bottom:2px solid #e5e7eb;}
   td{padding:8px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
   tbody tr:last-child td{border-bottom:none;}
-
-  /* Footer */
   .footer{margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;color:#9ca3af;font-size:10px;}
-
-  /* Print button */
   .print-bar{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 40px;display:flex;justify-content:flex-end;gap:10px;}
   .btn-print{display:inline-flex;align-items:center;gap:7px;padding:8px 18px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
   .btn-print:hover{background:#4338ca;}
-
   @media print{
     body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .page{padding:24px 28px;}
@@ -264,7 +240,6 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
   </button>
 </div>
 <div class="page">
-
   <div class="header">
     <div class="brand">
       <div class="brand-icon">
@@ -275,13 +250,13 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
       </div>
       <div class="brand-text">
         <h1>WorkLog</h1>
-        <p>Hours &amp; Earnings Report${selectedJob ? ` &mdash; ${selectedJob.name}` : ''}</p>
+        <p>Outstanding Hours${selectedJob ? ` &mdash; ${selectedJob.name}` : ''}</p>
       </div>
     </div>
     <div class="meta">
-      <div><strong>Prepared for:</strong> ${userName}</div>
+      <div><strong>Prepared by:</strong> ${userName}</div>
       <div><strong>Generated:</strong> ${generatedDate}</div>
-      <div><strong>Total records:</strong> ${visibleEntries.length} entries</div>
+      <div><strong>Unpaid entries:</strong> ${visibleEntries.length}</div>
     </div>
   </div>
 
@@ -289,20 +264,16 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
 
   <div class="summary">
     <div class="stat">
-      <div class="stat-label">Total Hours</div>
+      <div class="stat-label">Hours Owed</div>
       <div class="stat-value">${totalHours.toFixed(2)}<span style="font-size:13px;font-weight:500;color:#9ca3af;">h</span></div>
     </div>
     <div class="stat">
-      <div class="stat-label">Total Earned</div>
+      <div class="stat-label">Amount Owed</div>
       <div class="stat-value indigo">${currency}${totalEarnings.toFixed(2)}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Paid</div>
-      <div class="stat-value green">${currency}${paidEarnings.toFixed(2)}</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Outstanding</div>
-      <div class="stat-value amber">${currency}${unpaidEarnings.toFixed(2)}</div>
+      <div class="stat-label">Unpaid Entries</div>
+      <div class="stat-value amber">${visibleEntries.length}</div>
     </div>
   </div>
 
@@ -314,32 +285,32 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
         <th>Job</th>
         <th style="text-align:center;">Entries</th>
         <th style="text-align:right;">Hours</th>
-        <th style="text-align:right;">Earnings</th>
+        <th style="text-align:right;">Owed</th>
       </tr></thead>
       <tbody>${jobRows}</tbody>
     </table>
   </div>` : ''}
 
   <div class="section">
-    <div class="section-title">All Entries</div>
-    <table>
+    <div class="section-title">Unpaid Entries</div>
+    ${visibleEntries.length === 0
+      ? '<p style="color:#9ca3af;font-size:13px;padding:16px 0;">No unpaid entries — all caught up!</p>'
+      : `<table>
       <thead><tr>
         <th>Date</th>
         <th>Job</th>
         <th>Description</th>
         <th style="text-align:right;">Hours</th>
-        <th style="text-align:right;">Earnings</th>
-        <th style="text-align:center;">Status</th>
+        <th style="text-align:right;">Owed</th>
       </tr></thead>
       <tbody>${entryRows}</tbody>
-    </table>
+    </table>`}
   </div>
 
   <div class="footer">
     <span>WorkLog &mdash; generated ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC</span>
     <span>Confidential &mdash; do not distribute</span>
   </div>
-
 </div>
 </body>
 </html>`
@@ -354,6 +325,245 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
     win.document.close()
     win.focus()
     setPrinting(false)
+  }
+
+  async function generateImage() {
+    setSavingImage(true)
+    const entries = await fetchEntries()
+    if (!entries) { toast.error('Failed to generate image'); setSavingImage(false); return }
+
+    const currency = profile?.currency_symbol ?? '$'
+    const userName = profile?.full_name ?? 'Unknown'
+    const selectedJob = jobs.find(j => j.id === reportJobId) ?? null
+    const allVisible = selectedJob ? entries.filter(e => e.job?.name === selectedJob.name) : entries
+    const unpaid = allVisible.filter(e => !e.is_paid)
+
+    const totalHours = unpaid.reduce((s, e) => s + e.hours, 0)
+    const totalEarnings = unpaid.reduce((s, e) =>
+      s + (e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0), 0)
+
+    const DPR = 2
+    const W = 390
+    const PAD = 20
+    const ROW_H = 50
+
+    // Layout constants
+    const HEADER_H = 90
+    const GAP = 14
+    const SUMMARY_H = 72
+    const SECTION_LABEL_H = 22
+    const TABLE_HEAD_H = 28
+    const SEP = 1
+    const TOTAL_ROW_H = 44
+    const FOOTER_H = 36
+
+    const H = HEADER_H + GAP + SUMMARY_H + GAP + SECTION_LABEL_H + TABLE_HEAD_H + SEP + unpaid.length * ROW_H + TOTAL_ROW_H + GAP + FOOTER_H
+
+    const canvas = document.createElement('canvas')
+    canvas.width = W * DPR
+    canvas.height = H * DPR
+    const ctx = canvas.getContext('2d')!
+    ctx.scale(DPR, DPR)
+
+    function rr(x: number, y: number, w: number, h: number, r: number) {
+      ctx.beginPath()
+      ctx.moveTo(x + r, y)
+      ctx.lineTo(x + w - r, y)
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+      ctx.lineTo(x + w, y + h - r)
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+      ctx.lineTo(x + r, y + h)
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+      ctx.lineTo(x, y + r)
+      ctx.quadraticCurveTo(x, y, x + r, y)
+      ctx.closePath()
+    }
+
+    // White background
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, W, H)
+
+    // Header (indigo)
+    ctx.fillStyle = '#4f46e5'
+    ctx.fillRect(0, 0, W, HEADER_H)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = 'bold 20px sans-serif'
+    ctx.fillText('WorkLog', PAD, 32)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.65)'
+    ctx.font = '12px sans-serif'
+    ctx.fillText(`Outstanding Hours${selectedJob ? ` — ${selectedJob.name}` : ''}`, PAD, 54)
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    ctx.fillText(dateStr, PAD, 74)
+
+    // Summary box
+    const SY = HEADER_H + GAP
+    ctx.fillStyle = '#f3f4f6'
+    rr(PAD, SY, W - PAD * 2, SUMMARY_H, 12)
+    ctx.fill()
+
+    const MID = W / 2
+
+    // Left: amount owed
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.fillText('AMOUNT OWED', PAD + 12, SY + 18)
+    ctx.fillStyle = '#4f46e5'
+    ctx.font = 'bold 26px sans-serif'
+    ctx.fillText(`${currency}${totalEarnings.toFixed(2)}`, PAD + 12, SY + 52)
+
+    // Divider
+    ctx.strokeStyle = '#d1d5db'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(MID, SY + 14)
+    ctx.lineTo(MID, SY + SUMMARY_H - 14)
+    ctx.stroke()
+
+    // Right: hours
+    ctx.textAlign = 'right'
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.fillText('HOURS OWED', W - PAD - 12, SY + 18)
+    ctx.fillStyle = '#111827'
+    ctx.font = 'bold 26px sans-serif'
+    const hText = `${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}h`
+    ctx.fillText(hText, W - PAD - 12, SY + 52)
+    ctx.textAlign = 'left'
+
+    // Section label
+    const SLY = SY + SUMMARY_H + GAP
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.fillText('UNPAID ENTRIES', PAD, SLY + 12)
+
+    // Table header
+    const THY = SLY + SECTION_LABEL_H
+    ctx.fillStyle = '#9ca3af'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.fillText('DATE', PAD, THY + 12)
+    ctx.fillText('JOB', PAD + 86, THY + 12)
+    ctx.textAlign = 'right'
+    ctx.fillText('HRS', W - PAD - 66, THY + 12)
+    ctx.fillText('AMOUNT', W - PAD, THY + 12)
+    ctx.textAlign = 'left'
+
+    // Separator
+    const SEPY = THY + TABLE_HEAD_H
+    ctx.strokeStyle = '#e5e7eb'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(PAD, SEPY)
+    ctx.lineTo(W - PAD, SEPY)
+    ctx.stroke()
+
+    // Entry rows
+    const ROWSY = SEPY + 6
+    if (unpaid.length === 0) {
+      ctx.fillStyle = '#9ca3af'
+      ctx.font = '13px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('No unpaid entries', W / 2, ROWSY + 28)
+      ctx.textAlign = 'left'
+    } else {
+      unpaid.forEach((e, i) => {
+        const ry = ROWSY + i * ROW_H
+        const earnings = e.job ? calcEarnings(e.hours, e.job.rate, e.job.type as 'hourly' | 'fixed') : 0
+
+        if (i % 2 === 1) {
+          ctx.fillStyle = '#f9fafb'
+          ctx.fillRect(PAD, ry - 4, W - PAD * 2, ROW_H)
+        }
+
+        // Date
+        const parts = e.date.split('-')
+        ctx.fillStyle = '#374151'
+        ctx.font = '13px sans-serif'
+        ctx.fillText(`${parts[1]}/${parts[2]}`, PAD, ry + 16)
+        ctx.fillStyle = '#9ca3af'
+        ctx.font = '10px sans-serif'
+        ctx.fillText(parts[0], PAD, ry + 32)
+
+        // Color dot
+        ctx.fillStyle = e.job?.color ?? '#6366f1'
+        ctx.beginPath()
+        ctx.arc(PAD + 88, ry + 12, 4, 0, Math.PI * 2)
+        ctx.fill()
+
+        // Job name
+        ctx.fillStyle = '#111827'
+        ctx.font = '13px sans-serif'
+        const jn = e.job?.name ?? '—'
+        ctx.fillText(jn.length > 13 ? jn.slice(0, 12) + '…' : jn, PAD + 98, ry + 16)
+
+        // Description
+        if (e.description) {
+          ctx.fillStyle = '#9ca3af'
+          ctx.font = '11px sans-serif'
+          const desc = e.description.length > 17 ? e.description.slice(0, 16) + '…' : e.description
+          ctx.fillText(desc, PAD + 98, ry + 32)
+        }
+
+        // Hours
+        ctx.fillStyle = '#374151'
+        ctx.font = '13px sans-serif'
+        ctx.textAlign = 'right'
+        ctx.fillText(`${e.hours % 1 === 0 ? e.hours : e.hours.toFixed(1)}h`, W - PAD - 66, ry + 16)
+        ctx.textAlign = 'left'
+
+        // Earnings
+        ctx.fillStyle = '#4f46e5'
+        ctx.font = 'bold 13px sans-serif'
+        ctx.textAlign = 'right'
+        ctx.fillText(`${currency}${earnings.toFixed(2)}`, W - PAD, ry + 16)
+        ctx.textAlign = 'left'
+      })
+    }
+
+    // Total row
+    const TOTY = ROWSY + unpaid.length * ROW_H + 8
+    ctx.strokeStyle = '#d1d5db'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(PAD, TOTY)
+    ctx.lineTo(W - PAD, TOTY)
+    ctx.stroke()
+
+    ctx.fillStyle = '#111827'
+    ctx.font = 'bold 14px sans-serif'
+    ctx.fillText('Total', PAD, TOTY + 22)
+
+    ctx.textAlign = 'right'
+    ctx.fillStyle = '#374151'
+    ctx.fillText(`${totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}h`, W - PAD - 66, TOTY + 22)
+    ctx.fillStyle = '#4f46e5'
+    ctx.fillText(`${currency}${totalEarnings.toFixed(2)}`, W - PAD, TOTY + 22)
+    ctx.textAlign = 'left'
+
+    // Footer
+    ctx.fillStyle = '#d1d5db'
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`Prepared by ${userName} · WorkLog`, W / 2, H - 10)
+    ctx.textAlign = 'left'
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) { toast.error('Failed to create image'); setSavingImage(false); return }
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        toast.success('Image copied — paste it into a message!')
+      } catch {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `worklog-summary-${new Date().toISOString().slice(0, 10)}.png`
+        a.click()
+        URL.revokeObjectURL(url)
+        toast.success('Image downloaded!')
+      }
+      setSavingImage(false)
+    }, 'image/png')
   }
 
   async function signOut() {
@@ -470,7 +680,7 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
         <div className="flex flex-wrap gap-3">
           <Button
             onClick={exportCSV}
-            disabled={exporting || printing}
+            disabled={exporting || printing || savingImage}
             variant="outline"
             className="h-10 gap-2"
           >
@@ -484,7 +694,7 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
 
           <Button
             onClick={exportReport}
-            disabled={exporting || printing}
+            disabled={exporting || printing || savingImage}
             className="h-10 gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -492,11 +702,25 @@ export default function SettingsClient({ profile, email, jobs }: Props) {
               <path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
               <rect x="6" y="14" width="12" height="8"/>
             </svg>
-            {printing ? 'Generating…' : 'Print / Export PDF'}
+            {printing ? 'Generating…' : 'Export PDF'}
+          </Button>
+
+          <Button
+            onClick={generateImage}
+            disabled={exporting || printing || savingImage}
+            variant="outline"
+            className="h-10 gap-2"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            {savingImage ? 'Generating…' : 'Copy Image'}
           </Button>
         </div>
         <p className="text-xs text-gray-400 mt-3">
-          The report opens in a new tab. Review it, then use the Print button to send to a printer or save as PDF.
+          PDF and image show unpaid entries only. The PDF opens in a new tab — review it, then print or save as PDF. Copy Image copies a phone-ready summary to your clipboard to paste into a message.
         </p>
       </div>
 
